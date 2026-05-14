@@ -8,18 +8,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install NDK
         run: |
-          wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
-          unzip android-ndk-r26d-linux.zip
+          wget -q https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip -q android-ndk-r26d-linux.zip
           echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
 
-      - name: Get OpenCL Headers
+      - name: Get OpenCL Headers and ICD Loader
         run: |
           git clone https://github.com/KhronosGroup/OpenCL-Headers
           cp -r OpenCL-Headers/CL $ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include
+          git clone https://github.com/KhronosGroup/OpenCL-ICD-Loader
+          cd OpenCL-ICD-Loader && mkdir build_ndk && cd build_ndk
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+            -DOPENCL_ICD_LOADER_HEADERS_DIR=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=24 \
+            -DANDROID_STL=c++_shared
+          ninja
+          cp libOpenCL.so $ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android
+
+      - name: Install ninja
+        run: sudo apt-get install -y ninja-build
 
       - name: Clone llama.cpp
         run: |
@@ -30,8 +43,13 @@ jobs:
         run: |
           cd llama.cpp
           mkdir build-android && cd build-android
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DBUILD_SHARED_LIBS=OFF -DGGML_OPENCL=ON
-          make -j4
+          cmake .. -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_OPENCL=ON
+          ninja
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
